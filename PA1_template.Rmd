@@ -7,19 +7,209 @@ output:
 
 
 ## Loading and preprocessing the data
+We are going to use the packages "dplyr" and "ggplot2":
+
+```{r load_the_packages, results='hide', message=FALSE, warning=FALSE}
+require(dplyr)
+require(ggplot2)
+require(reshape)
+```
+
+The very first step we must take is download the data and descompresed it:
+
+```{r download_data}
+file <- "activity.csv"
+if(!file.exists(file)){
+     fileZip <- "activity.zip"
+     if(!file.exists(fileZip)){
+         temp <- tempfile()
+          download.file("https://github.com/AMCampos/RepData_PeerAssessment1/blob/master/activity.zip", 
+                        temp, mode="wb")
+     }
+     unzip(fileZip, file)
+}
+```
+
+As we have a csv file, we'll use the "read.csv" function. I'm going to check if the object AMD already exists. If don't, I'll load it:
+
+```{r read_data}
+if (!exists("AMD")){
+     AMD <- read.csv(file,header = TRUE, sep=",", colClasses = c("numeric","Date","numeric"))     
+}
+```
+
+We can check the AMD object:
+
+```{r small_view}
+head(AMD)
+tail(AMD)
+str(AMD)
+```
 
 
 
 ## What is mean total number of steps taken per day?
+To calculate the total number of steps taken per day, using "dplyr", we have to group by field "date" and sum the steps for each day (we store the sum in a new column: stepsDaily)
+
+```{r group_by_date}
+AMDpd <- AMD %>% group_by(date) %>% summarise(stepsDaily=sum(steps, na.rm=TRUE))
+```
+
+And the histogram of the total number of steps per day:
+
+```{r histogram_1, message=FALSE}
+g1 <- ggplot(data=AMDpd, aes(x=stepsDaily)) 
+g1 <- g1 + geom_histogram(na.rm = TRUE, col=I("blue"), fill=I("blue"))
+g1 <- g1 + labs(title="Total number of steps taken each day")
+g1 <- g1 + labs(x="Steps per day", y="Frequency")
+g1
+```
+
+Now, we are going to calculate the mean and median of the total number of steps taken per day:
+
+```{r mean_median_1}
+mean(AMDpd$stepsDaily, na.rm = TRUE)
+median(AMDpd$stepsDaily, na.rm = TRUE)
+```
+
+We could also calculate the mean and the median per day, for every interval:
+
+```{r mean_median_2}
+AMDpd2 <- AMD %>% group_by(date) %>% summarise(meanDay = mean(steps, na.rm=TRUE), medianDay = median(steps, na.rm=TRUE))
+
+options(tibble.print_max=Inf)
+AMDpd2
+```
 
 
 
 ## What is the average daily activity pattern?
+We make a time series plot of the five minute interval and the average number of steps taken, averaged across all days:
+
+```{r average_activity_pattern}
+AMDin <- AMD %>% group_by(interval) %>% summarise(meanSteps=mean(steps,na.rm=TRUE))
+qplot(interval, meanSteps, data=AMDin, geom = "line", col=I("blue"), main="Average daily activity pattern", xlab="Interval (minutes)", ylab="average number of steps")
+```
 
 
+We are going to use the function "which.max". This function return the index of the first maximum of a numeric or logical vector. So, with this information, we can get the interval:
+
+```{r max_number_steps}
+maxNumber <- AMDin[which.max(AMDin$meanSteps),]
+```
+
+So, the 5-minute interval that, on average, contains the maximum number of steps is `r maxNumber[1]`, with a number of steps: `r maxNumber [2]`.
 
 ## Imputing missing values
+We can get the number of missing values with the "filter()" and "summarise()" functions:
 
+```{r count_na}
+numNas <- AMD %>% filter(is.na(steps)==TRUE) %>% summarise(count=n())
+numNas
+```
+
+So, the number of missing values is `r numNas`. To fill these missing values, we'll use this strategy: we are going to use the average value for every interval across all the days:
+
+```{r fill_missin_values}
+AMD2 <- inner_join(AMD,AMDin)
+AMD2 <- AMD2 %>% mutate(steps=if_else(is.na(steps), meanSteps, steps))
+```
+
+Now, we have to drop the columns we don't need anymore, and we get a new dataset that is equal to the original dataset, but with the missing data fill in:
+
+```{r get_new_filled_dataset}
+AMD3 <- AMD2 %>% select(steps,date,interval)
+head(AMD3)
+```
+
+
+```{r histogram_2, message=FALSE}
+AMD3pd <- AMD3 %>% group_by(date) %>% summarise(stepsDaily=sum(steps, na.rm=TRUE))
+
+g2 <- ggplot(data=AMD3pd, aes(x=stepsDaily)) 
+g2 <- g2 + geom_histogram(na.rm = TRUE, col=I("blue"), fill=I("blue"))
+g2 <- g2 + labs(title="Total number of steps taken per day (missing values filled)")
+g2 <- g2 + labs(x="Steps per day", y="Frequency")
+g2
+```
+
+The mean and median total number of steps taken per day, in this new dataset is:
+
+```{r mean_median_3}
+mean(AMD3pd$stepsDaily, na.rm = TRUE)
+median(AMD3pd$stepsDaily, na.rm = TRUE)
+```
+
+And, if we want to get the mean and the median per day, for every interval:
+
+```{r mean_median_4}
+AMD3pd <- AMD3 %>% group_by(date) %>% summarise(meanSteps=mean(steps,na.rm=TRUE), medianSteps=median(steps,na.rm=TRUE))
+AMD3pd
+```
+
+The impact on the estimates of the total daily number of steps is slight. The new values for mean and median for each day haven't changed too much. May be the greatest changes can be found on the median values: as we add a new values in place of NA values, (and this mean to update all the intervals in each date with NA because, as you can see in the next results, when you find a NA value, all the day has NA value). That is to say that the days with NA values have now the same values in all their intervals, so, the mean and the median are the same for this days.
+
+```{r na_dates}
+AMDna <- AMD %>% filter(is.na(steps)==TRUE)
+AMDna %>% group_by(date) %>% summarise(count=n())
+```
 
 
 ## Are there differences in activity patterns between weekdays and weekends?
+
+We are going to use a function in order to get the day of the week in a numeric format. The "weekdays()" function return the name of the day (i.e. "sunday"), but ¿what happens if you are -like me- living in Spain, for instance?. It returns "domingo"... And I believe that the same happens if you are in France,... Our function uses an algorithm that has been pusblished in http://gaussianos.com/como-calcular-que-dia-de-la-semana-fue/, and returns a numeric value that say us the day of the week: 0 for monday, 1 for tuesday, etc... So, this is the function:
+
+```{r function_dia}
+dia <- function(x){
+     # This algorithm has been published in http://gaussianos.com/como-calcular-que-dia-de-la-semana-fue/
+     # To stay simple, we assume the date is between 2000 and 2099
+     a <- 0
+     b <- as.numeric(substr(as.character(format(x,'%Y')),3,5))
+     b <- b + trunc(b/4)
+     c <- 0
+     
+     m=as.numeric(format(x,"%m"))
+     
+     if (a%%4==0 & ((m==1||m==2))){
+          c <- -1
+     }
+     
+     d <- as.numeric(substr("622503514624", m, m))
+     e <- as.numeric(format(x,"%d"))
+     t <- a + b + c + d + e
+     t%%7
+}
+```
+
+Now, we can get a new dataset with a column that contains the type of day:
+
+```{r gettin_day_of_week}
+AMD3 <- AMD3 %>% mutate(typeofday = if_else(dia(date) %in% seq(1:5),"weekday","weekend"))
+AMD3 <- AMD3 %>% mutate(typeofday = as.factor(typeofday))
+```
+
+Plot with the average number of steps taken (averaged across all weekday days or weekend days):
+
+```{r facet_plot_by_type_of_day}
+AMD3in <- AMD3 %>% group_by(interval,typeofday) %>% summarise(meanSteps=mean(steps,na.rm=TRUE))
+gr <- ggplot(AMD3in, aes(x=interval, y=meanSteps)) + geom_line(colour="blue")
+gr <- gr + ggtitle("Average daily activity pattern")
+gr <- gr + labs(x="Intervals (5-minutes)", y="Average number of steps")
+gr <- gr + facet_grid(.~typeofday) 
+gr
+```
+
+I would like to say that it would be nice to add some other plots (means difference between intervals in weekday and weekend) to show the differents patters between a "week day" and a "weekend day":
+
+```{r plot_differences}
+ex1 <- cast(AMD3in,interval ~ typeofday, value="meanSteps")
+ex1 <- ex1 %>% mutate(dif=weekday-weekend)
+p <- ggplot(ex1, aes(x=interval,y=dif)) + geom_line(colour="blue")
+p <- p + labs(title="Differences in patterns (weekday and weekend)", x="Intervals (5-minutes)", y="Steps")
+p
+```
+
+In this plot, the possitive values for dif tell us that there are more steps in a week day than in a weekend day for a given interval. Negatives values for dif involve more steps in a weekend day than in a week day, for a given interval. By the way, we can see a negative values between 500 and 600 (five to six), maybe because the subject get up earlier on weekend. Also there is more activity in weekdays about 1500 (going job?) or 1900 (coming bak home?). 
+ 
+. 
+
